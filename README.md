@@ -1,10 +1,11 @@
 # MakeFile-Auto-Generator
-Generates a makeFile for a C++ project using g++
+Generates a makeFile for a C++ source file which includes other source files and headers from different directories. 
 
 ### Requirements:
 	- Python 3.x
-	- Python 2.x is NOT supported as some odd behavior occurs during makefile generation
-	- g++ (GCC) 7.1.1 20170630 (Others will most likely work but have not been tested)
+	- Python 2.x is NOT supported as some odd behaviors occur during makefile generation.
+	- g++ (GCC) 7.1.1 20170630 (Others will most likely work but have not been tested).
+	- (Optional) Nuitka for compiling into a slightly faster and more portable binary.
 
 ### Usage:
 	makeGen  [-h | --help] [-C | --CompileTarget File.cpp] [-L | --Libs "LibNames"] [-V | --Verbose]
