@@ -1,16 +1,17 @@
 # MakeFile-Auto-Generator
-Generates a makeFile for a C++ project
+Generates a makeFile for a C++ project using g++
 
-usage: makeGen  [-h | --help] [-C | --CompileTarget File.cpp] [-L | --Libs "LibNames"] [-V | --Verbose]
-		[-O | --CompilerOptimization level] [-W | --CompilerWarnings]
+### Requirements:
+	- Python 3.x
+	- Python 2.x is NOT supported as some odd behavior occurs during makefile generation
+	- g++ (GCC) 7.1.1 20170630 (Others will most likely work but have not been tested)
 
-Description:
-	- MakeGen v0.1
-	- This program automatically generates a makefile for a specified C++ Source file.
-	Dependacies:
-	   	- g++ Compiler
+### Usage:
+	makeGen  [-h | --help] [-C | --CompileTarget File.cpp] [-L | --Libs "LibNames"] [-V | --Verbose]
+		 [-O | --CompilerOptimization level] [-W | --CompilerWarnings]
 
-Flag Definitions:
+### Flag Definitions:
+
 	Compile Target:	(REQUIRED!)
 	   	- Set the file we want to compile all of our code into.
 	   	- Example: main.cpp
