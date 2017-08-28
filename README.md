@@ -3,7 +3,7 @@ MakeFile-Auto-Generator
 Generates a makeFile for a C++ source file which includes other source files and headers from different directories. 
 
 Requirements:
-=============
+-----------------------------
 - Python 3.x
 - Python 2.x is NOT supported as some odd behaviors occur during makefile generation.
 - g++ (GCC) 7.1.1 20170630 (Others will most likely work but have not been tested).
@@ -11,17 +11,14 @@ Requirements:
 
 
 Usage:
-======
-usage: makeGen  [-h | --help] [-C | --CompileTarget File.cpp] [-l | --Libs "LibNames"]
-		[-L | --LibDirectories "LibPaths"] [-I | --IncludeDirectories "IncludePaths"] [-V | --Verbose]
-		[-O | --CompilerOptimization level] [-W | --CompilerWarnings] [--Clang] [--gcc] [-std value]
-		[-o | --outFile name]
+----------
+usage: makeGen.py [flags]
 
 Flag Definitions:
 -----------------
 <kbd>Flag</kbd> | <kbd>Definition</kbd>
 --- | ---
-<kbd>-C</kbd> | <p><kbd><strong><u>Target to Compile:</u></strong></kbd></p> Set the file we want to compile all of our code into.<br> Example: ```-C main.cpp ```
+<kbd>-C </kbd> | <p><kbd><strong><u>Target to Compile:</u></strong></kbd></p> <mark> - Required Peramiter! </mark> <br>Set the file we want to compile all of our code into.<br> Example: ```-C main.cpp ```
 <kbd>-o</kbd>| <p><kbd><strong><u>Output executable name:</u></strong></kbd></p>Set the name of the output executable the makefile will generate.<br> Example: ```-o a.out```
 <kbd>-l</kbd> |<p><kbd><strong><u>Libraries:</u></strong></kbd></p> Set the name of the librarys you would like to link the executable to at compile time. <br> Example: ` -l  "GL GLEW GLU"`
 <kbd>-L</kbd> | <p><kbd><strong><u>Library Directories:</u></strong></kbd></p>Give the compiler a Directory to look for librarys in. <br> Example: `-L "path/to/lib_1 path/to/lib_2"`
