@@ -16,13 +16,26 @@ Usage:
 		[-O | --CompilerOptimization level] [-W | --CompilerWarnings] [--Clang] [--gcc] [-std value]
 		[-o | --outFile name]
 
-
-
+Flag Definitions:
+-----------------
+Flag | Definition
+--- | ---
+`- C` | Set the file we want to compile all of our code into.
+`- o`| Set the name of the output executable the makefile will generate.
+`- l` | Set the name of the librarys you would like to link the executable to at compile time.
+`- L` | Give the compiler a Directory to look for librarys in.
+`- I` | Give the compiler a Directory to look for includes in.
+`- V` | This enables printing out information about what librarys are.
+`- O` | COME BACK T <Enter>
+`- W` | Disable selected compiler compiler warnings.
+`-std` |  Set the C++ standard used for the compiler.
 
 Flag Definitions:
 -----------------
 
-	Compile Target:	(REQUIRED!)
+	
+
+Compile Target:	(REQUIRED!)
 	- Set the file we want to compile all of our code into.
 	- Example: main.cpp
 
