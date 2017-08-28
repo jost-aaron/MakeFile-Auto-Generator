@@ -1,22 +1,46 @@
-# Compile with nuitka to executable
+ # Compile with nuitka to executable
+
+# Goals for Version 0.3:
+# - Add suppert for include directorys
+# - Add support for library directorys
+# - Add support for exporting shared librarys.
+# - Add a makefile.metadata to support faster rebuilding of makefiles.
+#       This will contain information about the current make file so it dosent
+#       need to be pased and stuff.
+# - Add feature which will export a build.sh file to run the makefile.
+#   This build.sh file will be able to access a hidden mode called Recursive
+#   mode which allows for updating the build.sh file after being called from
+#   that script
 
 import sys
-
 import os
 import subprocess
 import datetime
 import difflib
 
-fileToCompile = ""
-listOfcppFiles = []
+# DataBase stuff
+headerFiles = []
+sourceFiles = []
+directoryMacrosDictionary = dict()
+fileDic = dict()
+filesProcessedDic = set([])
 
-usingLibrariesString = ""
+# User Defined variables
 compiler_flags = ""
-
+fileToCompile = ""
+outputFileName = "out"
+selectedCompiler = "g++"
+usingLibrariesString = ""
+libraryDirectories = ""
+includeDirectories = ""
 VerboseMode = False
-DebugMode = False
+QuickCompile = False
+compilerStandard = ""
 
-Version = "0.1"
+
+DebugMode = False
+Version = "0.2"
+
 
 # Progrss bar class
 class progressBar():
@@ -42,6 +66,9 @@ class progressBar():
     current_progress_num = 0
     done = 0
     bar_title = "Progress"
+    current_task = ""
+    lastPrintLength = 0
+
 
 
     def __init__(self,bar_size,total_num,title=None):
@@ -53,8 +80,10 @@ class progressBar():
             self.bar_title = title
         self.build_str()
 
-    def update(self,new_val):
+    def update(self,new_val,current_task=None):
         self.current_percent = int((new_val*100)/self.total)
+        if(current_task is not None):
+            self.current_task = current_task
         self.build_str()
 
     def build_str(self):
@@ -67,90 +96,145 @@ class progressBar():
             self.current_progress_num = int((self.current_percent/100)*self.bar_length)
             num_blank = self.bar_length - self.current_progress_num
 
-            print_str = "\r" + self.bar_title +": "
+            print_str = "\r " + self.bar_title +": "
             # print_str += "#"*(self.current_progress_num)
 
             print_str += "◼"*(self.current_progress_num)
 
-            print_str += "▱"*(num_blank-1) + " " + str(self.current_percent) + "%"
+            print_str += "▱"*(num_blank-1) + " " + str(self.current_percent) + "% (" + self.current_task + ")"
             # print_str += "-"*(num_blank-1) + " " + str(self.current_percent) + "%"
 
-            sys.stdout.write(print_str)
+            numAdded = 0
+            if(self.lastPrintLength == 0):
+                self.lastPrintLength = len(print_str)
+
+            else:
+                if(self.lastPrintLength > len(print_str)):
+                    print_str += " "*(self.lastPrintLength - len(print_str))
+                    numAdded = (self.lastPrintLength - len(print_str))
+
+            self.lastPrintLength = len(print_str) - numAdded
+
+            sys.stdout.write(print_str + "\r")
 
             if (num_blank-1 <= 0):
                 self.done = 1
 
         if (self.done == 1):
-            print_str = "\r" + self.bar_title +": Done" + " "*((self.current_progress_num)+1) + "\n"
+            print_str = "\r" + self.bar_title +": Done" + " "*((self.current_progress_num)+1) + " "*(4+ len(self.current_task))+ "\n"
             sys.stdout.write(print_str)
             self.done = 2
 
+# Run the usage menue
+def runArgsMenue():
+    print("usage: makeGen  [-h | --help] [-C | --CompileTarget File.cpp] [-l | --Libs \"LibNames\"]")
+    print("\t\t[-L | --LibDirectories \"LibPaths\"] [-I | --IncludeDirectories \"IncludePaths\"] [-V | --Verbose]")
+    print("\t\t[-O | --CompilerOptimization level] [-W | --CompilerWarnings] [--Clang] [--gcc] [-std value]")
+    print("\t\t[-o | --outFile name]")
 # Print the help menue for the program
 def runHelpMenue():
-    print("usage: makeGen  [-h | --help] [-C | --CompileTarget File.cpp] [-L | --Libs \"LibNames\"] [-V | --Verbose]")
-    print("\t\t[-O | --CompilerOptimization level] [-W | --CompilerWarnings]")
+    runArgsMenue()
     print()
-    print("Description:\n" + "\t- MakeGen v" + Version + "\n" +"\t- This program automatically generates a makefile for a specified C++ Source file.")
+    print("Description:\n" + "\t- MakeGen v" + Version + "\n" +"\t- This program automatically generates a makefile for a specified C/C++ Source file.")
     print("\tDependacies:")
-    tabLen = " "*3
-    print("\t" + tabLen + "\t- g++ Compiler")
+    tabLen = " "*0
+    print("\t" + "\t- One or more of the following. (g++,Clang,gcc)")
     print("\nFlag Definitions:")
 
     # Print Descritions for compile target flag
-    print("\tCompile Target:\t(REQUIRED!)")
-    print("\t" + tabLen + "\t- Set the file we want to compile all of our code into.")
-    print("\t" + tabLen + "\t- Example: main.cpp")
+    print("   Compile Target:\t(REQUIRED!)")
+    print("\t- Set the file we want to compile all of our code into.")
+    print("\t- Example: main.cpp")
     print()
 
-    print("\tLibs:")
-    print("\t" + tabLen + "\t- Set the name of the librarys you would like to link the")
-    print("\t" + tabLen + "\t    executable to at compile time.")
-    print("\t" + tabLen + "\t- Example: \"GL GLEW GLU\"")
+    print("   Out File:")
+    print("\t- Set the name of the output executable the makefile will generate.")
+    print("\t- Example: -o a.out")
     print()
 
-    print("\tVerbose:")
-    print("\t" + len(tabLen)*" " + "\t- This enables printing out information about what librarys are")
-    print("\t" + len(tabLen)*" " + "\t    being linked and what object files are being generated.")
+    print("   Libs:")
+    print("\t- Set the name of the librarys you would like to link the")
+    print("\t    executable to at compile time.")
+    print("\t- Example: \"GL GLEW GLU\"")
     print()
 
-    print("\tCompiler Optimization:")
-    print("\t" + len(tabLen)*" " + "\t- This sets the optimization level of g++ for compilation.")
-    print("\t" + len(tabLen)*" " + "\t- Any valid g++ optimization level can be used.")
-    print("\t" + len(tabLen)*" " + "\t- Usage:")
-    print("\t" + len(tabLen)*" " + "\t\t* For no Optimization dont use this flag")
-    print("\t" + len(tabLen)*" " + "\t\t* 1-3 (1 being little optimization, 3 being full optimization)")
-    print("\t" + len(tabLen)*" " + "\t\t* g (No optimization and add debugging symbols in the")
-    print("\t" + len(tabLen)*" " + "\t\t    binary for debugging)")
+    print("   Lib Directory(s):")
+    print("\t- Give the compiler a Directory to look for librarys in.")
+    print("\t- Example: -L \"path/to/lib_1 path/to/lib_2\"")
+    print()
 
-    print("\tCompiler Warnings:")
-    print("\t" + len(tabLen)*" " + "\t- Disable g++ compilation warnings.")
+    print("   Includes:")
+    print("\t- Give the compiler a Directory to look for includes in.")
+    print("\t- Example: -I \"path/to/include_1 path/to/include_2\"")
+    print()
+
+    print("   Verbose:")
+    print("\t- This enables printing out information about what librarys are")
+    print("\t    being linked and what object files are being generated.")
+    print()
+
+    print("   Compiler Optimization:")
+    print("\t- This sets the optimization level of selected compiler for compilation.")
+    print("\t- Any valid selected compiler optimization level can be used.")
+    print("\t- Usage:")
+    print("\t\t+ For no Optimization dont use this flag")
+    print("\t\t+ 1-3 (1 being little optimization, 3 being full optimization)")
+    print("\t\t+ g (No optimization and add debugging symbols in the")
+    print("\t\t    binary for debugging)\n")
+
+    print("   Compiler Warnings:")
+    print("\t- Disable selected compiler compilation warnings.\n")
+
+    print("   Compiler Choices:")
+    print("\t- (C++ Compilers)")
+    print("\t    + g++ (Default)")
+    print("\t    + Clang")
+    print("\t- (C Compiler)")
+    print("\t    + gcc\n")
+
+    print("   Compiler Standard:")
+    print("\t- Set the standart used for the compiler.")
+    print("\t- Example: -std c++11.\n")
 
 def verboseModePrint(inputString):
-        if(VerboseMode):
-            print("-",inputString)
+    if(VerboseMode):
+        print("[MakeGen]:",inputString)
 
 # Paser and run a system command and return the output of the command
 def getCommandLineArgs():
     # Allow for fileToCompile to be written to
-    global fileToCompile
-    global usingLibrariesString
-    global VerboseMode
-    global compiler_flags
+    global fileToCompile,usingLibrariesString,VerboseMode,compiler_flags,outputFileName
+    global DebugMode,selectedCompiler,compilerStandard,includeDirectories,libraryDirectories
 
     argsFound = sys.argv
 
-    if (".py" in argsFound[0]):
-        argsFound.pop(0)
-
+    if(len(argsFound) == 1):
+        runArgsMenue()
+        exit(1)
 
     # Check if --help was called or no arguments were given
-    if("-h" in argsFound or "--help" in argsFound or len(argsFound) == 0):
+    if("-h" in argsFound or "--help" in argsFound):
         runHelpMenue()
-        exit(0)
+        exit(1)
+
+    # Check if -Debug was called to put the program in debug mode
+    if("-Debug" in argsFound):
+        DebugMode = True
 
     # Set the verbosity mode
     if("-V" in argsFound or "--Verbose" in argsFound):
         VerboseMode = True
+
+    # Set the filename
+    if("-o" in argsFound or "--outFile" in argsFound):
+        indexOfOutFileFlag = argsFound.index("-o")
+        if(indexOfOutFileFlag == len(argsFound)-1):
+            print("Error: name requred after using -o or --outFile.")
+            exit(1)
+        if("-" in argsFound[indexOfOutFileFlag+1]):
+            print("Error: name requred after using -o or --outFile.")
+            exit(1)
+        outputFileName = argsFound[indexOfOutFileFlag+1]
 
     if("-W" in argsFound or "--CompilerWarnings" in argsFound):
         compiler_flags+= "-w"
@@ -170,7 +254,6 @@ def getCommandLineArgs():
         # TODO: Add an additional check if the indexOfCompileFileArg is still None. Is kind of redundant through
 
         # Check if there is a .cpp file after the flag
-
         if(indexOfCompileFileArg > len(argsFound)-1):
             print("Error: No source file (file.cpp) was given after --CompileTarget or -C.")
             exit(1)
@@ -178,7 +261,7 @@ def getCommandLineArgs():
         # Make sure the next thing is not a flag
         if("-" != argsFound[indexOfCompileFileArg][0]):
 
-            if (".cpp" in argsFound[indexOfCompileFileArg][-4:]):
+            if (".cpp" == argsFound[indexOfCompileFileArg][-4:]):
                 fileToCompile = argsFound[indexOfCompileFileArg]
             else:
                 print("Error: File name: " + argsFound[indexOfCompileFileArg] + " is not a C++ source file (Example: file.cpp)")
@@ -202,12 +285,11 @@ def getCommandLineArgs():
         print("Error: Compile Target not specified with -C or --CompileTarget.")
         exit(1)
 
-
     # Check if any librarys have been specified
-    if ("-L" in argsFound or "--Libs" in argsFound):
+    if ("-l" in argsFound or "--Libs" in argsFound):
         indexOfLibsArg = None
-        if("-L" in argsFound):
-            indexOfLibsArg = argsFound.index("-L")+1
+        if("-l" in argsFound):
+            indexOfLibsArg = argsFound.index("-l")+1
         elif("--Libs" in argsFound):
             indexOfLibsArg = argsFound.index("--Libs")+1
 
@@ -215,10 +297,10 @@ def getCommandLineArgs():
 
         #  Do some Checks to make sure there is an argument given after the flag
         if (indexOfLibsArg > len(argsFound)-1):
-            print("Error:  No arguments found for -L or --Libs Flag!")
+            print("Error:  No arguments found for -l or --Libs Flag!")
             exit(1)
         if("-" == argsFound[indexOfLibsArg][0]):
-            print("Error: No arguments found for -L or --Libs Flag!")
+            print("Error: No arguments found for -l or --Libs Flag!")
             exit(1)
 
         # Parse the input string into a list of librarys
@@ -230,12 +312,20 @@ def getCommandLineArgs():
             # Split up the librarys into a list
             unformatedLibStrings = unformatedLibStrings.split(" ")
 
-            # Add -l to all of the libNames so they are in the correct format for g++ when linking
+            verboseModePrint("Adding Libraries")
+            stringToPrint = "  + "
+            # Add -l to all of the libNames so they are in the correct format for selected compiler when linking
             for lib in unformatedLibStrings:
                 # If we are in verbose mode tell the user a library was added to the link list
-                verboseModePrint("Library Added: "+lib)
-                libsString += "-l" + lib + " "
+                # print("  + "+lib)
+                stringToPrint += lib
+                if (unformatedLibStrings.index(lib) != len(unformatedLibStrings)-1):
+                    stringToPrint += ","
 
+
+                libsString += "-l" + lib + " "
+            if (VerboseMode):
+                print(stringToPrint)
             # Take away the last space which was added in the last itteration
             libsString.strip()
 
@@ -281,196 +371,132 @@ def getCommandLineArgs():
                 compiler_flags += "-O" + argsFound[indexOfOptimizationLevel]
                 verboseModePrint("Compiler Optimization Set to: " + "-O" + argsFound[indexOfOptimizationLevel])
 
+    # Other compiler has been selected
+    if ("--Clang" in argsFound and "--gcc" not in argsFound):
+        selectedCompiler = "clang"
+    elif ("--gcc" in argsFound and "--Clang" not in argsFound):
+        selectedCompiler = "gcc"
+    elif ("--gcc" not in argsFound and "--Clang" not in argsFound):
+        pass
+    else:
+        print("Error: Only one compiler can be chosen at once.")
+        exit(1)
+
+    # Set the c++ standard
+    if ("-std" in argsFound):
+
+        indexOfStdArg = argsFound.index("-std")
+        if(indexOfStdArg == len(argsFound)-1):
+            print("Error: No C++ standard given with -std flag.")
+            exit(1)
+
+        stdFound = argsFound[indexOfStdArg+1]
+        if ("-" in stdFound):
+            print("Error: No C++ standard given with -std flag.")
+            exit(1)
+        if("c++" not in stdFound and "C++" not in stdFound):
+            print("Error: Incorrectly formated C++ standard!")
+            print("Correct exaple: -std c++11 or -std C++11")
+            print("Given:",stdFound)
+            exit(1)
+        verboseModePrint("Compiler Standard Set to: " + stdFound)
+        compiler_flags += " -std="+stdFound
+
+    # Add library directories
+    if ("-L" in argsFound or "--LibDirectories" in argsFound):
+        indexOfLibDirsArg = argsFound.index("-L")
+        if (indexOfLibsArg == len(argsFound)-1):
+            print("Error: Library Directories must be specified when using -L")
+            exit(1)
+        if("-" in argsFound[indexOfLibDirsArg+1]):
+            print("Error: Library Directories must be specified when using -L")
+            exit(1)
+        if("/" not in argsFound[indexOfLibDirsArg+1]):
+            print("Warning: The input directories for -L dont contain any \"/\" and therefore might be incorrect.")
+            print("Given:",argsFound[indexOfLibDirsArg+1])
+            ans = input("Continue anyway? (y or n) ")
+            if("y" not in ans):
+                print("exiting...")
+                exit(1)
+        libraryDirectories = "".join([" -L "+x for x in argsFound[indexOfLibDirsArg+1].split(" ")])
+        verboseModePrint("Adding Library Directories:")
+        if(VerboseMode):
+            for incDir in argsFound[indexOfLibDirsArg+1].split(" "):
+                print("  +",incDir)
+        compiler_flags +=  libraryDirectories
+
+    # Add include directories
+    if ("-I" in argsFound or "--IncludeDirectories" in argsFound):
+        indexOfIncDirsArg = argsFound.index("-I")
+        if (indexOfIncDirsArg == len(argsFound)-1):
+            print("Error: Include Directories must be specified when using -L")
+            exit(1)
+        if("-" in argsFound[indexOfIncDirsArg+1]):
+            print("Error: Include Directories must be specified when using -L")
+            exit(1)
+        if("/" not in argsFound[indexOfIncDirsArg+1]):
+            print("Warning: The input directories for -I dont contain any \"/\" and therefore might be incorrect.")
+            print("Given:",argsFound[indexOfIncDirsArg+1])
+            ans = input("Continue anyway? (y or n) ")
+            if("y" not in ans):
+                print("exiting...")
+                exit(1)
+        includeDirectories = "".join([" -I "+x for x in argsFound[indexOfIncDirsArg+1].split(" ")])
+
+        verboseModePrint("Adding Include Directories:")
+        if(VerboseMode):
+            for incDir in argsFound[indexOfIncDirsArg+1].split(" "):
+                print("  +",incDir)
+
+        compiler_flags +=  includeDirectories
+
+    # Set the name of the output executable
+    if ("-o" in argsFound or "--outFile" in argsFound):
+
+        return 0
+
 # Run a system command ie Bash and return its result
 def runSysCmd(commandString):
     splitStr = commandString.split()
     return str(subprocess.check_output(splitStr))
 
-# Generate a list of all of the cpp files in the project directory
-def findCppFiles(dirName=None):
-
-    # Make listOfcppFiles writable
-    global listOfcppFiles
-
-    # List of all of the cpp files we have
-    fileNames = []
-
-    # A list of all the directories in the current directory
-    directorysToVisit = []
-
-    # Get a list of all of the files and folders in the current directory
-    if(dirName is not None):
-        dirList = os.listdir(dirName)
-    else:
-        dirList = os.listdir(".")
-
-
-    dirListSorted = []
-
-
-    # Sort all of the .cpp files into the dirListSorted
-    for item in dirList:
-        if (".cpp" in item):
-            dirListSorted.append(item)
-
-    # Sort all of the directorys into dirListSorted
-    for item in dirList:
-        if (dirName is not None):
-            if(os.path.isdir(dirName + "/" + item)):
-                dirListSorted.append(item)
-        else:
-            if(os.path.isdir(item)):
-                dirListSorted.append(item)
-
-    # Go through all of the items in the current directory
-    for item in dirListSorted:
-
-        # Check if we are in a sub directory. If so use the path from currend working directory
-        if (dirName is not None):
-            # If the item is a directory add it to the list of directorys
-            if(os.path.isdir(dirName + "/"+ item)):
-                directorysToVisit.append(item)
-            # If it is a C++ source file and it is not the main file we are compiling add it to the list of files
-            elif(".cpp" in item and item != fileToCompile):
-                fileNames.append(dirName+"/"+item)
-
-        else:
-
-            # If the item is a directory add it to the list of directorys
-            if(os.path.isdir(item)):
-                directorysToVisit.append(item)
-            # If it is a C++ source file and it is not the main file we are compiling add it to the list of files
-            elif(".cpp" in item and item != fileToCompile):
-                fileNames.append(item)
-
-    if(len(directorysToVisit) > 0):
-        # Go through all of the directories we found and find all of their files and directories
-        for directory in directorysToVisit:
-            # Get all of the files from the below directory
-            if (dirName is not None):
-                prevFiles = findCppFiles(dirName=dirName + "/" + directory)
-            else:
-                prevFiles = findCppFiles(dirName=directory)
-            # Add each file to the file list
-            for fileFound in prevFiles:
-                fileNames.append(fileFound)
-
-    listOfcppFiles = fileNames
-    return fileNames
-
-# Use g++ -MM to generate a list of dependancies for the file
+# Use selected compiler -MM to generate a list of dependancies for the file
 def getMakeLine(fileName):
-    # If this fails and throws an exception that means g++ threw an error which needs to be fixed
+    # If this fails and throws an exception that means selected compiler threw an error which needs to be fixed
     try:
-        # Get the make dependancies from g++ -MM
-        completeLine = runSysCmd("g++ -MM " + fileName)
-        # If
-        if(VerboseMode):
-            verboseOFileName = fileName.split("/")[-1].split(".cpp")[0] + ".o"
-            verboseModePrint("Object file Added: " + verboseOFileName)
-        # Get rid of some artifacts that g++ throws out
-        completeLine = str(completeLine).replace("\\n","").replace("\\ ","").replace("b\'","").replace("\'","").replace("\\","")
+        # Get the make dependancies from selected compiler -MM
+        completeLine = runSysCmd("" + selectedCompiler + " -MM " + fileName)
+
+        # Get rid of some artifacts that selected compiler throws out
+        completeLine = str(completeLine).replace("\\n","").replace("\\ ","").replace("b\'","").replace("\'","").replace("\\","").replace("  "," ")
         return completeLine
     except:
         exit(1)
 
-# Write information about the make file into it
+ # Write information about the make file into it
+
 def writeMakeFileInformation(f):
 
     currentDate = datetime.datetime.now()
 
     f.write("# This file was autogenerated by makeGen v" + Version + "\n")
     f.write("# Author: Aaron Jost\n")
-    f.write("# Date Generated: " + str(currentDate.day) + "/" + str(currentDate.month) + "/" + str(currentDate.year) + " @ " + str(currentDate.hour) + ":" + str(currentDate.minute) + "\n\n" )
+    f.write("# Date Generated: " + str(currentDate.day) + "/" + str(currentDate.month) + "/" + str(currentDate.year) + " @ " + str(currentDate.hour) + ":" + str(currentDate.minute) + "\n\n")
 
-
-    return 0;
-
-# Write the make file
-def genMakeFile():
-    # Storage varable for object file information
-    # contents [["example.o","exampleDep.cpp exampleDep.hpp ..." ] ... ]
-    dotOlines = []
-
-    if(not VerboseMode):
-        progress = progressBar(30,len(listOfcppFiles)-1,title="MakeFile Generation")
-
-    # For every cpp file do the following
-    for cppFile in listOfcppFiles:
-        if(not VerboseMode):
-            progress.update(listOfcppFiles.index(cppFile))
-
-        # Generate the make line
-        completeLine = getMakeLine(cppFile)
-
-        # Separate the object.o file name and its dependancies
-        oFileName = completeLine.split(":")[0]
-        oFileDeps = completeLine.split(":")[1].strip()
-
-        # Append the information to the object file information Storage varable
-        dotOlines.append([oFileName,oFileDeps])
-
-    # Generate a list of all the object files we need to generate
-    objFileList = ""
-    for objFiles in dotOlines:
-        objFileList += objFiles[0] + " "
-
-    # Storage variable for an unorganized list of all the directories we are pulling source files from
-    directorysList = []
-    # Organized list of the above list. [cppFiles , ... , directories , ...]
-    replaceDirPaths = []
-
-    # Generate a list of all directories
-    for currentCppFile in listOfcppFiles:
-
-        # In the current cppFile with path. Get just the path part of it without the cppFile
-        indexOfLast = currentCppFile.rfind("/")+1
-        dirFound = currentCppFile[0:indexOfLast]
-
-        # If that directory has not been found before add it to the list of directories
-        if (dirFound not in directorysList):
-            directorysList.append(dirFound)
-
-    # Open a file to write the makefile into
-    f = open("makefile","w")
-
-    writeMakeFileInformation(f)
-
-    # Write a variable into the make file with the compiler flags we want
-    if(compiler_flags != ""):
-        f.write("COMPILER_FLAGS = "+compiler_flags + "\n")
-
-    # Go through all of the directories and see if there are any file paths we can assign to a variable to reduce the length of the makefile code
-    for Direct in directorysList:
-        # If the number of directories transversed by the path is more than one make it into variable
-        if(Direct.count("/") > 1):
-            # Take off the last / in the path
-            dirsUsed = Direct.split("/")[0:-1]
-            # initalize a variable for the reconstructed path
-            reconstructed = ""
-            # For each directory define a variable for it in the make file
-            for item in dirsUsed:
-                reconstructed += item + "/"
-                replaceDirPaths.append(reconstructed)
-            # Write the variable to the make file
-            f.write(str((dirsUsed[-1] + "_DIR").upper()) + " = " + reconstructed[0:-1] + "\n")
-
-    f.write("\n")
-
-    # Write the final compilation definition for target file
-    f.write("# Does all of the linking and compilation of " + fileToCompile + ".\n")
-    f.write("out: " +fileToCompile + " " + objFileList+"\n")
-    if (compiler_flags != ""):
-        f.write("\tg++ "+ "$(COMPILER_FLAGS)" + " " + fileToCompile + " " + objFileList+"-o out "+ usingLibrariesString+"\n\n")
-    else:
-        f.write("\tg++ " + fileToCompile + " " + objFileList+"-o out "+ usingLibrariesString+"\n\n")
+# Write all of the file cleanUp defintions into the makefile
+def writeMakeFileCleanUp(f,listofDirs):
     # Wrte the cleanup definitions for pre-compiled headers
     f.write("# Used for cleaning up all of the precompiled headers.\n")
     f.write("cleanHeads:\n")
+    f.write("\trm -rf *.gch\n")
     # Get a list of all the directories in the current folder
-    listofDirs = [x[0] for x in os.walk(".")][1:]
     for cleanDir in listofDirs:
-        f.write("\trm -rf "+cleanDir+"/*.gch\n")
+        macroCleanDir = cleanDir[0:-1]
+        try:
+            macroCleanDir = directoryMacrosDictionary[macroCleanDir]
+        except:
+            pass
+        f.write("\trm -rf "+macroCleanDir.strip("./")+"/*.gch\n")
     f.write("\n")
 
     # Write the cleanup definitions for the object files
@@ -482,42 +508,200 @@ def genMakeFile():
     f.write("# Used for cleaning up everything.\n")
     f.write("clean: cleanObjs cleanHeads\n")
 
+# Recursive helper function to get all of the dependancies for all of the targets
+def getUsedFilesRecursive(currentFile,currentDir):
 
+    findings = {""}
+    if (currentFile[-4:] == ".hpp"):
+        baseName = currentFile.strip(".hpp")
+    elif (currentFile[-2:] == ".h"):
+        baseName = currentFile.strip(".h")
+    else:
+        print()
+        print("Error: Non Header file included in:",(currentDir,currentFile))
+        if(".cpp" in currentFile or ".c" == currentFile[-2:]):
 
+            print("Source files should be used by including their header file then linked.")
+        exit(1)
 
+    if(os.path.isfile(currentDir+baseName + ".cpp")):
+        findings.update([baseName+".cpp"])
 
-    # Generate code for all of the object files
-    lastDir = ""
+    thisFilesRequirements = getMakeLine(currentDir+currentFile).split(":")[1].strip().split(" ")[1:]
 
-    for dep in dotOlines:
-        objectDefinitionLineElement = dep[1].split()[0]
-        indexOfLast = objectDefinitionLineElement.rfind("/")+1
-        dirFound = objectDefinitionLineElement[0:indexOfLast]
-        currentIndex = dotOlines.index(dep)
+    for requirement in thisFilesRequirements:
+        pathToSearchIn = "".join([n+"/" for n in requirement.split("/")[0:-1]])
+        fileWeAreLookingAt = requirement.split("/")[-1]
+        if(not filesProcessedDic.issuperset([fileWeAreLookingAt])):
+            findings.update(getUsedFilesRecursive(fileWeAreLookingAt,pathToSearchIn))
+        filesProcessedDic.update([fileWeAreLookingAt])
 
-        # Check if any of the parts in the directory have been defined as variables to save space
-        for replacment in replaceDirPaths:
-            if (replacment in dep[1] and dirFound.count("/") > 1 and replacment.count("/") > 1):
-                indexOfReplacment = dotOlines.index(dep)
-                VarName = replacment.split("/")[-2]
-                dotOlines[indexOfReplacment][1] = dotOlines[indexOfReplacment][1].replace(replacment[0:-1],"$("+VarName.upper() + "_DIR)")
+    return list(findings)
 
-        if(dirFound != lastDir or dirFound == ""):
-            if(dirFound == ""):
-                dirFound = "Souce Directory"
-            f.write("\n#" + "-"*27 + "-"*(len(dirFound)-1) + "\n")
-            f.write("#------------ " + dirFound + " ------------\n")
-            f.write("#" + "-"*27 + "-"*(len(dirFound)-1) + "\n")
-            lastDir = dirFound
+# Get all of the headers and source files used by the main file we are compiling
+def getUsedFiles():
 
-        f.write(dep[0] + ": "+ dotOlines[currentIndex][1]+"\n")
-        if(compiler_flags != ""):
-            f.write("\tg++ "+ "$(COMPILER_FLAGS)"+" -c "+ dotOlines[currentIndex][1] +"\n")
+    global headerFiles,sourceFiles,fileDic,filesProcessedDic
+
+    AllowedFiles = {""}
+
+    # Get all of the dependancies for main file
+    mainsRequirements = getMakeLine(fileToCompile).split(":")[1].strip().split(" ")[1:]
+
+    filesProcessedDic.update(fileToCompile)
+
+    if(not VerboseMode):
+        progress = progressBar(30,len(mainsRequirements),title="Finding Dependacies")
+    else:
+        print("[MakeGen]: Finding Depandancies: ")
+    index = 0
+    for dep in mainsRequirements:
+        index += 1
+        if(not VerboseMode):
+            progress.update(index,current_task=dep)
         else:
-            f.write("\tg++ " +"-c "+ dotOlines[currentIndex][1] +"\n")
+            print("  +",str(dep))
+        # Get the directory path to the file from the full path
+        pathToSearchIn = "".join([n+"/" for n in dep.split("/")[0:-1]])
+        fileWeAreLookingAt = dep.split("/")[-1]
 
-    f.close()
+
+        AllowedFiles.update([fileWeAreLookingAt])
+        AllowedFiles.update(getUsedFilesRecursive(fileWeAreLookingAt,pathToSearchIn))
+        filesProcessedDic.update(fileWeAreLookingAt)
+        AllowedFiles.discard("")
+
+
+    fileDictionary = list(AllowedFiles)
+
+    dirStructure = []
+    for files in os.walk("./"):
+        dirName = files[0]
+        filesInDir = files[2]
+        for f in filesInDir:
+            if(f in fileDictionary):
+                newfullPath = dirName
+                if (newfullPath[-1] != "/"):
+                    newfullPath += "/"
+                newfullPath += f
+                dirStructure.append(newfullPath)
+
+    for f in dirStructure:
+        if(f[-4:] == ".hpp" or f[-2:] == ".h"):
+            headerFiles.append(f)
+        elif(f[-4:] == ".cpp" or f[-2] == ".c"):
+            sourceFiles.append(f)
+        else:
+            print("Error: found a file which is not a cpp,c,h,or hpp file",f)
+            exit(1)
+
+    for header in headerFiles:
+        headerFileName = header.split("/")[-1]
+        headerPath = header.strip(headerFileName)
+        fileDic.update([(headerFileName,headerPath)])
+
+    for source in sourceFiles:
+        sourceFileName = source.split("/")[-1]
+        sourcePath = source.strip(sourceFileName)
+        fileDic.update([(sourceFileName,sourcePath)])
+
+def writeMakeFile():
+    # Open a file to write the makefile into
+    f = open("makefile","w")
+
+    writeMakeFileInformation(f)
+
+    # Write a variable into the make file with the compiler flags we want
+    if(compiler_flags != ""):
+        f.write("COMPILER_FLAGS = "+compiler_flags +  "\n\n")
+
+    dirSet = {""}
+    for d in (sourceFiles+headerFiles):
+        dirSet.update(["".join([n+"/" for n in d.split("/")[0:-1]])])
+    dirSet.discard("")
+
+    # Generate macros for directories which are more that 2 deep
+    GeneratedComment = False
+    for d in dirSet:
+        if (d.count("/") > 2):
+            if(not GeneratedComment):
+                f.write("# Directory Macros to reduice file size.\n")
+                GeneratedComment = True
+            macroName = d.split("/")[-2].upper() + "_DIR"
+            macroValue = d[0:-1]
+            directoryMacrosDictionary.update([(macroValue,"$("+macroName+")")])
+            f.write(macroName+" = " + macroValue.strip("./") +"\n")
+    f.write("\n")
+
+    # Write the definition for the main file
+    f.write("# Make file definition for output file.\n")
+    f.write("out: ")
+
+    depsString = fileToCompile + " "
+
+    for cppFile in sourceFiles:
+        addition = (cppFile.split("/")[-1][0:-4]+".o ")
+        depsString += addition
+
+    f.write(depsString + "\n")
+
+
+
+
+    if (len(compiler_flags) != 0):
+        flags = "$(COMPILER_FLAGS)"
+    else:
+        flags = ""
+    f.write("\t" + selectedCompiler + " " + flags + " " + depsString + " " +  usingLibrariesString + " -o " + outputFileName)
+
+    f.write("\n\n")
+
+    # Write cleanUp definitions
+    writeMakeFileCleanUp(f,list(dirSet))
+
+    currentFolder = "."
+    if(not VerboseMode):
+        progress = progressBar(30,len(sourceFiles),title="Generating makefile")
+    else:
+        print("[MakeGen]: Generating Object File Definitions:")
+    p = 0
+    for cppFile in sourceFiles:
+        p += 1
+        if(not VerboseMode):
+            progress.update(p,current_task="Generating: " + cppFile.split("/")[-1].strip(".cpp")+".o")
+        else:
+            print("  +",str(cppFile.split("/")[-1].strip(".cpp")+".o"))
+        # print(cppFile)
+        fileName = cppFile.split("/")[-1]
+        dirName = "".join([n+"/" for n in cppFile.split("/")[:-1]])
+        if (dirName != currentFolder):
+
+            currentFolder = dirName
+
+            f.write("\n#"+"-"*12 + "-"*len(dirName+"Directory: ") + "\n")
+            f.write("#"+"-"*5 + " "+ "Directory: " + dirName.strip("./") + "/ "+ "-"*5 + "\n")
+            f.write("#"+"-"*12 + "-"*len(dirName+"Directory: ") + "\n")
+
+        requirements = ""
+        requiredFiles = getMakeLine(cppFile).split(":")[-1].split(" ")
+        requiredFiles.remove("")
+        for path in requiredFiles:
+            lookingForFile = path.split("/")[-1]
+            properPath = fileDic[lookingForFile]
+            if(properPath.count("/") > 2):
+                properPath = directoryMacrosDictionary["."+properPath[:-1]] + "/"
+            else:
+                properPath = "."+properPath
+            requirements+= (properPath+lookingForFile + " ").strip("./")
+
+        f.write(fileName[:-4]+".o: " + requirements + "\n")
+
+        if (len(compiler_flags) != 0):
+            flags = "$(COMPILER_FLAGS)"
+        else:
+            flags = ""
+        f.write("\t" + selectedCompiler + " -c " + flags + " " + requirements + "\n")
 
 getCommandLineArgs()
-findCppFiles()
-genMakeFile()
+getUsedFiles()
+writeMakeFile()
