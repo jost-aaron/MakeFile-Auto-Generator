@@ -25,5 +25,5 @@ Flag Definitions:
 <kbd>-I</kbd> | <p><kbd><strong><u>Include Directories:</u></strong></kbd></p>Give the compiler a Directory to look for includes in. <br> Example: `-I "path/to/include_1 path/to/include_2"`
 <kbd>-V</kbd> | <p><kbd><strong><u>Verbose output mode:</u></strong></kbd></p>This enables printing out information about what librarys are.
 <kbd>-O</kbd> | <p><kbd><strong><u>Compiler optimization level:</u></strong></kbd></p> This sets the optimization level of the compiler for compilation.  Any valid selected compiler optimization level can be used. <br>**Usage:**<br>  + For no Optimization dont use this flag  **1-3** (1 being little optimization, 3 being full optimization) <br>**+ g** (No optimization and add debugging symbols in the binary for debugging) <br> Examples: `-O 1` `-O 2` `-O 3` `-O g`
-<kbd>-W</kbd> | Disable selected compiler compiler warnings.
+<kbd>-W</kbd> | Disable compiler warnings.
 <kbd>-std</kbd> |  Set the C++ standard used for the compiler. <br> Example: `-std c++11.`
